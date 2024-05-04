@@ -1,9 +1,7 @@
-import sys
 from pathlib import Path
 import sendgrid
 import sendgrid.helpers.mail as sgh
 
-sys.path.append(str(Path(__file__).resolve().parent.parent))
 from config import constants
 
 class Email(object):
@@ -33,7 +31,7 @@ def notify_admins(message, subject=None):
 		subject=subject,
 		body_text=message,
 		body_html=message,
-		categories=['origin-custodian'])
+		categories=['my-app', 'notify_admins'])
 
 def send_message(sender, recipients, subject, body_text, body_html, 
     attachments=None, ccs=None, bccs=None, categories=None, send=True):
@@ -72,3 +70,8 @@ def send_message(sender, recipients, subject, body_text, body_html,
             mail.add_category(sgh.Category(category))
     if send:
         response = sg_api.client.mail.send.post(request_body=mail.get())
+        print(response.status_code)
+        print(response.body)
+        print(response.headers)
+
+
