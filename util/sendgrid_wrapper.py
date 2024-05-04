@@ -1,4 +1,3 @@
-from pathlib import Path
 import sendgrid
 import sendgrid.helpers.mail as sgh
 
