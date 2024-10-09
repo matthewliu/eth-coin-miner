@@ -27,16 +27,17 @@ async def notify_admins(message, parse_mode=None):
         parse_mode=parse_mode
     )
 
-# Use ParseMode.HTML to send HTML formatted messages
+# Use ParseMode.HTML to send HTML formatted messages and ParseMode.MARKDOWN to send Markdown formatted messages
 async def send_text(chat_id, text, parse_mode=None, **kwargs):
     await send(TelegramMessage(chat_id, text, 'text', parse_mode=parse_mode, **kwargs))
 
 async def send_photo(chat_id, photo, caption=None, **kwargs):
-    await send(TelegramMessage(chat_id, photo, 'photo', kwargs={'caption': caption, **kwargs}))
+    await send(TelegramMessage(chat_id, photo, 'photo', caption=caption, **kwargs))
 
 async def send_document(chat_id, document, caption=None, **kwargs):
-    await send(TelegramMessage(chat_id, document, 'document', kwargs={'caption': caption, **kwargs}))
+    await send(TelegramMessage(chat_id, document, 'document', caption=caption, **kwargs))
 
+# Content type sticker can either take a .webp file or a Telegram sticker ID
 async def send_sticker(chat_id, sticker, **kwargs):
     await send(TelegramMessage(chat_id, sticker, 'sticker', **kwargs))
 
@@ -55,13 +56,15 @@ async def send(telegram_message, send=True):
                 await bot.send_photo(
                     chat_id=telegram_message.chat_id,
                     photo=telegram_message.content,
-                    **telegram_message.kwargs
+                    caption=telegram_message.kwargs.get('caption'),
+                    **{k: v for k, v in telegram_message.kwargs.items() if k != 'caption'}
                 )
             elif telegram_message.content_type == 'document':
                 await bot.send_document(
                     chat_id=telegram_message.chat_id,
                     document=telegram_message.content,
-                    **telegram_message.kwargs
+                    caption=telegram_message.kwargs.get('caption'),
+                    **{k: v for k, v in telegram_message.kwargs.items() if k != 'caption'}
                 )
             elif telegram_message.content_type == 'sticker':
                 await bot.send_sticker(
