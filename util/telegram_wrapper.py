@@ -1,5 +1,5 @@
 import asyncio
-import logging
+import threading
 
 from telegram import Bot
 from telegram.constants import ParseMode
@@ -17,7 +17,7 @@ class TelegramMessage:
         self.disable_web_page_preview = disable_web_page_preview
         self.kwargs = kwargs
 
-async def notify_admins(message, parse_mode=None):
+async def _async_notify_admins(message, parse_mode=None):
     if 'localhost' in constants.HOST or 'pagekite' in constants.HOST:
         prefix = 'DEV: ' if parse_mode is None else '<b>DEV</b>: '
         message = f'{prefix}{message}'
@@ -26,6 +26,19 @@ async def notify_admins(message, parse_mode=None):
         text=message,
         parse_mode=parse_mode
     )
+
+def notify_admins(message, parse_mode=None):
+    def send_message():
+        try:
+            asyncio.run(_async_notify_admins(message, parse_mode))
+        except Exception as e:
+            print(f"Error sending Telegram message: {e}")
+
+    # Run the send_message function in a separate thread
+    thread = threading.Thread(target=send_message)
+    thread.start()
+    # If you want to wait for the message to be sent before continuing, uncomment the next line
+    # thread.join()
 
 # Use ParseMode.HTML to send HTML formatted messages and ParseMode.MARKDOWN to send Markdown formatted messages
 async def send_text(chat_id, text, parse_mode=None, **kwargs):
