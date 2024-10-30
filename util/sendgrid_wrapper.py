@@ -1,6 +1,5 @@
 import sendgrid
 import sendgrid.helpers.mail as sgh
-
 from config import constants
 
 class Email(object):

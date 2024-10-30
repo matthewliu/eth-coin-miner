@@ -1,7 +1,7 @@
-from config.constants import WALLETS
-from eth_account import Account
-from web3 import Web3
 import logging
+from eth_account import Account
+from config.constants import WALLETS
+from util.alchemy_connector import w3
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,8 @@ class Transaction:
 class Wallet:
     def __init__(self, name, public_key, private_key):
         self.name = name
-        self.public_key = public_key
+        # Convert public key to checksum address
+        self.public_key = w3.to_checksum_address(public_key)
         self.private_key = private_key
 
     def __str__(self):
@@ -46,6 +47,7 @@ class WalletManager:
             logger.info("Initializing new WalletManager instance")
             cls._instance = super(WalletManager, cls).__new__(cls)
             cls._instance.wallets = []
+            cls._instance.web3 = w3
             cls._instance._load_wallets()
         else:
             logger.debug("Using existing WalletManager instance")
@@ -92,7 +94,7 @@ class WalletManager:
         
         signed_txn = account.sign_transaction(transaction_dict)
         logger.info(f"Transaction signed successfully")
-        return signed_txn.rawTransaction.hex()
+        return signed_txn.rawTransaction
 
     def get_all_addresses(self):
         addresses = [wallet.public_key for wallet in self.wallets]
