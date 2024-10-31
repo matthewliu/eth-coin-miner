@@ -19,13 +19,12 @@ for key, value in os.environ.items():
         except json.JSONDecodeError:
             print(f"Warning: Invalid JSON in {key}")
 
-ETHC_ERC_20_CONTRACT_ADDRESS=os.getenv('ETHC_ERC_20_CONTRACT_ADDRESS')
-ETHC_MINER_CONTRACT_ADDRESS=os.getenv('ETHC_MINER_CONTRACT_ADDRESS')
+ETHC_CONTRACT_ADDRESS=os.getenv('ETHC_CONTRACT_ADDRESS')
 
 # Load ABI from JSON file
-abi_path = Path(__file__).parent / 'abi' / 'ethc_miner_contract.json'
+abi_path = Path(__file__).parent / 'abi' / 'ethc_contract.json'
 with open(abi_path) as f:
-    ETHC_MINER_CONTRACT_ABI = json.load(f)['abi']
+    ETHC_CONTRACT_ABI = json.load(f)['abi']
 
 SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
 DEV_EMAIL = os.getenv('DEV_EMAIL')

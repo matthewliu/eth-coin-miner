@@ -1,6 +1,6 @@
 import logging
 from decimal import Decimal
-from config.constants import ETHC_MINER_CONTRACT_ADDRESS, ETHC_MINER_CONTRACT_ABI
+from config.constants import ETHC_CONTRACT_ADDRESS, ETHC_CONTRACT_ABI
 from util.alchemy_connector import w3
 
 logger = logging.getLogger(__name__)
@@ -8,31 +8,68 @@ logger = logging.getLogger(__name__)
 class ETHCMiner:
     def __init__(self, wallet_manager):
         """Initialize the ETHC miner with Web3 connection and contract"""
-        self.web3 = w3  # Use existing Alchemy connection
+        logger.info("Initializing ETHCMiner...")
+        self.web3 = w3
         self.wallet_manager = wallet_manager
         
         # Initialize contract using ABI from constants
         self.contract = self.web3.eth.contract(
-            address=ETHC_MINER_CONTRACT_ADDRESS,
-            abi=ETHC_MINER_CONTRACT_ABI
+            address=ETHC_CONTRACT_ADDRESS,
+            abi=ETHC_CONTRACT_ABI
         )
+        logger.info(f"Contract initialized at proxy address: {ETHC_CONTRACT_ADDRESS}")
+
+    async def get_current_block(self):
+        """Get current block and timing information from contract"""
+        try:
+            current_block = self.contract.functions.blockNumber().call()
+            last_block_time = self.contract.functions.lastBlockTime().call()
+            current_time = self.web3.eth.get_block('latest').timestamp
+            
+            # Block interval is constant (1 minute)
+            block_interval = 60
+            
+            time_since_last = current_time - last_block_time
+            blocks_ready = time_since_last // block_interval
+            
+            block_info = {
+                'current_block': current_block,
+                'last_block_time': last_block_time,
+                'time_since_last': time_since_last,
+                'blocks_ready': blocks_ready,
+                'next_block_available': time_since_last >= block_interval
+            }
+            
+            logger.debug(f"Block info: {block_info}")
+            return block_info
+        except Exception as e:
+            logger.error(f"Error getting current block: {e}")
+            raise
 
     async def get_mining_stats(self):
         """Get current mining statistics"""
         try:
-            current_block = self.contract.functions.blockNumber().call()
-            block_interval = self.contract.functions.BLOCK_INTERVAL().call()
-            mine_cost = self.contract.functions.MINE_COST().call()
+            logger.info("Fetching mining stats...")
+            # Get block info first
+            block_info = await self.get_current_block()
+            
+            # Constants are stored differently in the proxy contract
+            block_interval = 60  # 1 minute in seconds
+            mine_cost = self.web3.to_wei(0.0001, 'ether')  # 0.0001 ETH
             mining_reward = self.contract.functions.miningReward().call()
             last_block_time = self.contract.functions.lastBlockTime().call()
             
-            return {
-                'current_block': current_block,
+            stats = {
+                'current_block': block_info['current_block'],
                 'block_interval': block_interval,
                 'mine_cost': self.web3.from_wei(mine_cost, 'ether'),
                 'mining_reward': mining_reward,
-                'last_block_time': last_block_time
+                'last_block_time': last_block_time,
+                'time_since_last': block_info['time_since_last'],
+                'blocks_ready': block_info['blocks_ready']
             }
+            logger.info(f"Mining stats retrieved: {stats}")
+            return stats
         except Exception as e:
             logger.error(f"Error getting mining stats: {e}")
             raise
@@ -101,7 +138,8 @@ class ETHCMiner:
     async def get_halving_info(self):
         """Get information about halving schedule"""
         try:
-            current_block = self.contract.functions.blockNumber().call()
+            # Always get fresh block number
+            current_block = await self.get_current_block()
             last_halving = self.contract.functions.lastHalvingBlock().call()
             next_halving = self.contract.functions.nextHalvingBlock().call()
             halving_interval = self.contract.functions.halvingInterval().call()
