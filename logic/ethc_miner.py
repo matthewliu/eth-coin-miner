@@ -2,6 +2,7 @@ import logging
 from decimal import Decimal
 from config.constants import ETHC_CONTRACT_ADDRESS, ETHC_CONTRACT_ABI
 from util.alchemy_connector import w3
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +35,11 @@ class ETHCMiner:
             
             block_info = {
                 'current_block': current_block,
+                'next_block': current_block + 1,
                 'last_block_time': last_block_time,
                 'time_since_last': time_since_last,
                 'blocks_ready': blocks_ready,
-                'next_block_available': time_since_last >= block_interval
+                'next_block_available': True
             }
             
             logger.debug(f"Block info: {block_info}")
@@ -53,15 +55,14 @@ class ETHCMiner:
             # Get block info first
             block_info = await self.get_current_block()
             
-            # Constants are stored differently in the proxy contract
-            block_interval = 60  # 1 minute in seconds
-            mine_cost = self.web3.to_wei(0.0001, 'ether')  # 0.0001 ETH
+            # Get costs and rewards from contract
+            mine_cost = self.contract.functions.mineCost().call()
             mining_reward = self.contract.functions.miningReward().call()
             last_block_time = self.contract.functions.lastBlockTime().call()
             
             stats = {
                 'current_block': block_info['current_block'],
-                'block_interval': block_interval,
+                'block_interval': 60,  # 1 minute in seconds
                 'mine_cost': self.web3.from_wei(mine_cost, 'ether'),
                 'mining_reward': mining_reward,
                 'last_block_time': last_block_time,
@@ -79,6 +80,8 @@ class ETHCMiner:
         try:
             miners = self.contract.functions.minersOfBlock(block_number).call()
             miner_count = self.contract.functions.minersOfBlockCount(block_number).call()
+            
+            # Use selectedMinerOfBlock function
             selected_miner = self.contract.functions.selectedMinerOfBlock(block_number).call()
             
             return {
@@ -93,32 +96,71 @@ class ETHCMiner:
     async def mine(self, wallet_name, mine_count=1):
         """Submit a mining transaction"""
         try:
+            # Get current block info (but don't wait)
+            block_info = await self.get_current_block()
+            
+            # Get contract state before mining
+            logger.info("\nChecking contract state:")
+            logger.info(f"- Block number from contract: {self.contract.functions.blockNumber().call()}")
+            logger.info(f"- Last block time: {self.contract.functions.lastBlockTime().call()}")
+            logger.info(f"- Current chain time: {self.web3.eth.get_block('latest').timestamp}")
+            logger.info(f"- Time since last block: {block_info['time_since_last']}s")
+            
+            # Get mining cost from contract
+            mine_cost = self.contract.functions.mineCost().call()
+            logger.info(f"- Mining cost from contract: {self.web3.from_wei(mine_cost, 'ether')} ETH")
+            
             wallet = self.wallet_manager.get_wallet_by_name(wallet_name)
-            mine_cost = self.contract.functions.MINE_COST().call()
-            total_cost = mine_cost * mine_count
             
+            # Calculate total cost including gas
+            total_mine_cost = mine_cost * mine_count
+            gas_limit = self.contract.functions.mine(mine_count).estimate_gas({
+                'from': wallet.public_key, 
+                'value': total_mine_cost
+            })
+            gas_limit = int(gas_limit * 1.2)  # Add 20% buffer
+            
+            # Get current gas prices
+            base_fee = self.web3.eth.get_block('latest').baseFeePerGas
+            priority_fee = self.web3.eth.max_priority_fee
+            max_fee_per_gas = base_fee * 2 + priority_fee  # Double the base fee for buffer
+            
+            max_gas_cost = gas_limit * max_fee_per_gas
+            total_cost = total_mine_cost + max_gas_cost
+            
+            logger.info("Cost breakdown:")
+            logger.info(f"- Mining cost: {self.web3.from_wei(total_mine_cost, 'ether')} ETH")
+            logger.info(f"- Max gas cost: {self.web3.from_wei(max_gas_cost, 'ether')} ETH")
+            logger.info(f"- Total needed: {self.web3.from_wei(total_cost, 'ether')} ETH")
+            
+            # Check wallet balance
+            balance = self.web3.eth.get_balance(wallet.public_key)
+            logger.info(f"- Wallet balance: {self.web3.from_wei(balance, 'ether')} ETH")
+            
+            if balance < total_cost:
+                raise ValueError("Insufficient funds for mining")
+                
             # Build transaction
-            if mine_count == 1:
-                tx = self.contract.functions.mine().build_transaction({
-                    'from': wallet.public_key,
-                    'value': total_cost,
-                    'nonce': self.web3.eth.get_transaction_count(wallet.public_key),
-                    'gasPrice': self.web3.eth.gas_price
-                })
-            else:
-                tx = self.contract.functions.mineBatch(mine_count).build_transaction({
-                    'from': wallet.public_key,
-                    'value': total_cost,
-                    'nonce': self.web3.eth.get_transaction_count(wallet.public_key),
-                    'gasPrice': self.web3.eth.gas_price
-                })
-
-            # Sign and send transaction
-            signed_tx = self.wallet_manager.sign_transaction(wallet_name, tx)
-            tx_hash = self.web3.eth.send_raw_transaction(signed_tx)
+            nonce = self.web3.eth.get_transaction_count(wallet.public_key, 'latest')
             
-            logger.info(f"Mining transaction submitted: {tx_hash.hex()}")
-            return tx_hash.hex()
+            transaction = {
+                'from': wallet.public_key,
+                'value': total_mine_cost,
+                'nonce': nonce,
+                'gas': gas_limit,
+                'maxFeePerGas': max_fee_per_gas,
+                'maxPriorityFeePerGas': priority_fee,
+                'type': 2,  # EIP-1559 transaction
+                'chainId': self.web3.eth.chain_id
+            }
+            
+            # Build and sign transaction
+            tx = self.contract.functions.mine(mine_count).build_transaction(transaction)
+            signed_tx = self.web3.eth.account.sign_transaction(tx, wallet.private_key)
+            
+            # Send transaction
+            tx_hash = self.web3.eth.send_raw_transaction(signed_tx.raw_transaction)
+            return tx_hash
             
         except Exception as e:
             logger.error(f"Error submitting mining transaction: {e}")
@@ -172,4 +214,38 @@ class ETHCMiner:
             }
         except Exception as e:
             logger.error(f"Error subscribing to events: {e}")
+            raise
+
+    async def wait_for_next_block(self):
+        """Wait until the next block is available for mining"""
+        max_attempts = 5  # Prevent infinite waiting
+        attempt = 0
+        
+        while attempt < max_attempts:
+            try:
+                block_info = await self.get_current_block()
+                logger.info(f"Current block: {block_info['current_block']}, Time since last: {block_info['time_since_last']}s")
+                
+                if block_info['next_block_available']:
+                    logger.info(f"Block {block_info['current_block']} is ready for mining")
+                    return block_info
+                
+                time_to_wait = min(60 - block_info['time_since_last'], 10)  # Wait max 10 seconds at a time
+                logger.info(f"Waiting {time_to_wait} seconds before next check...")
+                await asyncio.sleep(time_to_wait)
+                attempt += 1
+                
+            except Exception as e:
+                logger.error(f"Error while waiting for next block: {e}")
+                raise
+        
+        raise TimeoutError("Max attempts reached waiting for next block")
+
+    async def has_mined_block(self, wallet_address, block_number):
+        """Check if the wallet has already mined this block"""
+        try:
+            miners = await self.get_block_miners(block_number)
+            return wallet_address in miners['miners']
+        except Exception as e:
+            logger.error(f"Error checking if wallet has mined block: {e}")
             raise

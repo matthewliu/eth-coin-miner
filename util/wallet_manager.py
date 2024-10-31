@@ -83,18 +83,31 @@ class WalletManager:
         logger.warning(f"No wallet found with address: {address}")
         raise ValueError(f"No wallet found with address: {address}")
 
-    def sign_transaction(self, wallet_name, transaction):
-        """Sign a transaction using the specified wallet's private key"""
-        logger.info(f"Signing transaction with wallet: {wallet_name}")
-        wallet = self.get_wallet_by_name(wallet_name)
-        account = Account.from_key(wallet.private_key)
+    def sign_transaction(self, wallet_name: str, transaction: dict) -> bytes:
+        """Sign a transaction with the specified wallet's private key
         
-        # Convert Transaction object to dictionary format
-        transaction_dict = transaction.to_dict(self.web3, wallet.public_key)
+        Args:
+            wallet_name: Name of wallet to use for signing
+            transaction: Transaction dictionary to sign
         
-        signed_txn = account.sign_transaction(transaction_dict)
-        logger.info(f"Transaction signed successfully")
-        return signed_txn.rawTransaction
+        Returns:
+            Signed transaction bytes
+        """
+        try:
+            logger.info(f"Signing transaction with wallet: {wallet_name}")
+            wallet = self.get_wallet_by_name(wallet_name)
+            
+            # Sign the transaction
+            signed_tx = self.web3.eth.account.sign_transaction(
+                transaction,
+                private_key=wallet.private_key
+            )
+            
+            return signed_tx.rawTransaction
+            
+        except Exception as e:
+            logger.error(f"Error signing transaction: {e}")
+            raise
 
     def get_all_addresses(self):
         addresses = [wallet.public_key for wallet in self.wallets]
